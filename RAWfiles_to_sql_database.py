@@ -1,4 +1,4 @@
-#Script 1 : Create SQL database
+#Script 1 : Create SQL database from all .raw files in selected folder popping up whil running the whole code at once
 
 #%%Import
 from win32com.client import Dispatch
@@ -13,22 +13,20 @@ from datetime import datetime as dt
 from tqdm import tqdm
 
 #%%Working directory and raw files
-working_directory = "C:/Users/XXXX" # Change where you want to store det sql database file
+working_directory = "C:/Users/xpj165" # Change where you want to store det sql database file
 os.chdir(working_directory)
 
 #%%Class members
-Detector_used = {"No device": -1, "MS": 0, "PDA": 1, "A/D": 2, "Analog":3, "UV": 4}
+Channel_used = {"No device": -1, "MS": 0, "PDA": 1, "A/D": 2, "Analog":3, "UV": 4}
 EmptyVariant = variant(VT_EMPTY, [])
-detector_types = {0: "CID", 1: "PQD", 2: "ETD", 3: "HCD"}
-MS_types = {0: "ITMS", 1: "TQMS", 2: "SQMS", 3: "TOFMS", 4: "FTMS", 5: "Magnetic sector"}
-Sample_types = {0: "Sample", 1: "Blank", 2:"QC", 3: "Standard Clear (None)", 4: "Standard Update (None)", 5: "Standard Bracket (Open)", 6: "Standard Brcket Start (multiple brackets)", 7: "Standard Bracket End (multiple brackets"}
+Collision_types = {0: "CID", 1: "MPD", 2: "ECD", 3: "PQD", 4: "ETD", 5: "HCD", 6: "Any activation type", 7: "SA", 8: "PTR", 9: "NETD", 10: "NPTR"}
+MassAnalyzerTypes = {0: "ITMS", 1: "TQMS", 2: "SQMS", 3: "TOFMS", 4: "FTMS", 5: "Magnetic sector"}
 
 #%%Get my data 
 def GetmyData(rawfile, existing_samples=[]):
     obj0 = Dispatch("MSFileReader.XRawFile");
     obj0.open(str(rawfile))
-    obj0.SetCurrentController(Detector_used["MS"],1) #Detector device, the number of detector used (1st, 2nd etc)
-    
+    obj0.SetCurrentController(Channel_used["MS"],1) #Controller device, the number of controllers used (1st, 2nd etc)
     creation_date = obj0.GetCreationDate()
     creation_date = dt(creation_date.year,creation_date.month,creation_date.day,creation_date.hour,creation_date.minute,creation_date.second)
     
@@ -63,8 +61,8 @@ def GetMassList(obj0, ScanNum, cutoff=1):
                                        0, #Intensity cutoff type
                                        0, #Intensity cutoff value
                                        0, #Number of peaks
-                                       1, #bCentroid, 0 for profile MS data and 1 for centroid MS data
-                                       0.01, #CentroidPeakWidth
+                                       1, #bCentroid, choose 0 for profile MS data and 1 for centroid MS data
+                                       0.01, #CentroidPeakWidth - should be 0 if looking at profile data
                                        EmptyVariant, 
                                        EmptyVariant, 
                                        )
@@ -72,10 +70,9 @@ def GetMassList(obj0, ScanNum, cutoff=1):
     rt = obj0.RTFromScanNum(ScanNum)
     order = obj0.GetMSOrderForScanNum(ScanNum)
     fname = obj0.GetFilterForScanNum(ScanNum)
-    DetType = obj0.GetDetectorTypeForScanNum(ScanNum)
+    DetType = obj0.GetActivationTypeForScanNum(ScanNum,order)
     CE = obj0.GetCollisionEnergyForScanNum(ScanNum,order)
     MassAnalyzer = obj0.GetMassAnalyzerTypeForScanNum(ScanNum)
-    SampleType = obj0.GetSeqRowSampleType(ScanNum)
     FilePath = os.path.dirname(str(rawfile))
     Filename = Path(str(rawfile)).stem
     creation_date = obj0.GetCreationDate()
@@ -84,13 +81,12 @@ def GetMassList(obj0, ScanNum, cutoff=1):
     functions = dict(FilePath = FilePath,
                      Filename = Filename,
                      creation_date = creation_date,
-                     SampleType = Sample_types.get(SampleType, f"Unknown ({SampleType = })"),
                      scan=ScanNum, 
                      rt=rt, 
                      ms_order=order, 
                      MSfilter=fname, 
-                     MSAnalyzer = MS_types.get(MassAnalyzer, f"Unknown ({MassAnalyzer = })"),
-                     Detector_type = detector_types.get(DetType, f"Unknown ({DetType = })"),
+                     MSAnalyzer = MassAnalyzerTypes.get(MassAnalyzer, f"Unknown ({MassAnalyzer = })"),
+                     Detector_type = Collision_types.get(DetType, f"Unknown ({DetType = })"),
                      Collision_energy = CE,
                      Date = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
                      )
@@ -132,7 +128,6 @@ def clean_data(functions, data):
                               'MSAnalyzer': 'MS Analyzer',
                               'precursor ion': 'Precursor ion (m/z)', 
                               'Date':'Imported to sql at (YYYY-MM-DD HH-MM-SS)',
-                              'SampleType': 'Sample type',
                               'Ionization': 'Ionisation mode',
                               'MS Range': 'MS Range m/z',
                               'creation_date': 'Datafile created at (YYYY-MM-DD HH-MM-SS)',
@@ -141,6 +136,7 @@ def clean_data(functions, data):
                               'FilePath': 'File path'
                               }, inplace=True)
     del functions['MSfilter']
+    functions.loc[functions['MS\u207F'] > 1, 'Collision energy (eV)'] = 0
     
     data.insert(0, "ID", data['scan'].astype(str) + "_" + data['Filename'] + "_" + data['Datafile created at (YYYY-MM-DD HH-MM-SS)'].astype(str))
     del data['Filename']
